@@ -1,0 +1,8 @@
+df_cut.csv
+df_final_B.csv
+all_trip.csv
+*.csv
+.env
+__pycache__/
+*.pyc
+.DS_Store
