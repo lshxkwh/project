@@ -1,6 +1,6 @@
-streamlit==1.35.0
-pandas==2.2.2
-numpy==1.26.4
-plotly==5.22.0
-catboost==1.2.5
-scikit-learn==1.5.0
+streamlit
+pandas
+numpy
+plotly
+catboost
+scikit-learn
