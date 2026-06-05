@@ -4,3 +4,5 @@ numpy
 plotly
 catboost
 scikit-learn
+statsmodels
+scipy
