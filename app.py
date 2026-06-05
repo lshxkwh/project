@@ -705,89 +705,108 @@ elif menu == "🎯  Optuna & SHAP":
 # [8] 주행거리 예측기
 # =========================================================
 elif menu == "🔮  주행거리 예측기":
-    st.markdown('<div class="f1-header"><div class="f1-header-title">🔮 주행거리 예측기</div><div class="f1-header-sub">실제 CatBoost 모델 기반 주행거리 인퍼런스</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="f1-header"><div class="f1-header-title">🔮 주행거리 예측기</div><div class="f1-header-sub">슬라이더를 움직이면 실시간으로 예측됩니다</div></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header">🎛️ 주행 조건 입력</div>', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("<div style='font-size:10px;color:#CC0000;letter-spacing:1px;margin-bottom:8px'>주행 데이터</div>", unsafe_allow_html=True)
-        duration      = st.number_input("Duration (주행 시간, 초)",        min_value=60,   max_value=7200,  value=2400, step=60)
-        soc_consumed  = st.number_input("SOC_Consumed (배터리 소모, 0~1)", min_value=0.01, max_value=0.95,  value=0.15, step=0.01)
-        velocity_mean = st.number_input("Velocity_mean (평균 속도, km/h)", min_value=5.0,  max_value=130.0, value=52.0, step=1.0)
-        soc_lag1_std  = st.number_input("SoC_lag1_std",                    min_value=0.0,  max_value=0.2,   value=0.02, step=0.001, format="%.3f")
-    with col2:
-        st.markdown("<div style='font-size:10px;color:#CC0000;letter-spacing:1px;margin-bottom:8px'>지형 & 가속 패턴</div>", unsafe_allow_html=True)
-        elevation_std  = st.number_input("Elevation_MA3_std (고도 변동성)", min_value=0.0,  max_value=100.0, value=5.0,  step=0.5)
-        throttle_mean  = st.number_input("Throttle_lag1_mean",              min_value=0.0,  max_value=1.0,   value=0.18, step=0.01)
-        throttle_std   = st.number_input("Throttle_lag1_std",               min_value=0.0,  max_value=0.5,   value=0.12, step=0.01)
-        batt_temp_diff = st.number_input("Battery_Temperature_diff_mean",   min_value=-2.0, max_value=2.0,   value=0.05, step=0.01)
-    with col3:
-        st.markdown("<div style='font-size:10px;color:#CC0000;letter-spacing:1px;margin-bottom:8px'>배터리 & 환경</div>", unsafe_allow_html=True)
-        batt_current  = st.number_input("Battery_Current_max (A)",         min_value=0.0,  max_value=500.0, value=120.0, step=5.0)
-        batt_soc_end  = st.number_input("Battery_State_of_Charge_End",     min_value=0.0,  max_value=1.0,   value=0.65,  step=0.01)
-        aircon_mean   = st.number_input("AirCon_Power_lag1_mean (kW)",     min_value=0.0,  max_value=5.0,   value=0.3,   step=0.1)
-        weather_rainy = st.selectbox("날씨", [0,1], format_func=lambda x: "☀️  맑음 / 흐림" if x==0 else "🌧️  비")
+    # ── 핵심 3개 슬라이더 (항상 보임) ─────────────────────
+    st.markdown('<div class="section-header">🎛️ 핵심 주행 조건</div>', unsafe_allow_html=True)
+    sl1, sl2, sl3 = st.columns(3)
+    with sl1:
+        st.markdown("<div style='font-size:10px;color:#CC0000;letter-spacing:1px;margin-bottom:6px'>⏱️ 주행 시간</div>", unsafe_allow_html=True)
+        duration = st.slider("주행 시간 (분)", min_value=5, max_value=120, value=40, step=1)
+        duration_sec = duration * 60
+        st.markdown(f"<div style='text-align:center;font-size:18px;font-weight:900;color:#CC0000'>{duration}분</div>", unsafe_allow_html=True)
+    with sl2:
+        st.markdown("<div style='font-size:10px;color:#CC0000;letter-spacing:1px;margin-bottom:6px'>🔋 배터리 소모</div>", unsafe_allow_html=True)
+        soc_pct = st.slider("배터리 소모 (%)", min_value=1, max_value=95, value=15, step=1)
+        soc_consumed = soc_pct / 100
+        st.markdown(f"<div style='text-align:center;font-size:18px;font-weight:900;color:#CC0000'>{soc_pct}%</div>", unsafe_allow_html=True)
+    with sl3:
+        st.markdown("<div style='font-size:10px;color:#CC0000;letter-spacing:1px;margin-bottom:6px'>🏎️ 평균 속도</div>", unsafe_allow_html=True)
+        velocity_mean = st.slider("평균 속도 (km/h)", min_value=5, max_value=130, value=52, step=1)
+        st.markdown(f"<div style='text-align:center;font-size:18px;font-weight:900;color:#CC0000'>{velocity_mean} km/h</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header">🗺️ 경로 선택</div>', unsafe_allow_html=True)
-    rc1, rc2, rc3, rc4 = st.columns(4)
-    route_highway     = rc1.checkbox("🛣️  고속도로")
-    route_munich_east = rc2.checkbox("🏙️  뮌헨 동부")
-    route_munich_nfc  = rc3.checkbox("⚡  뮌헨 북부 급속충전")
-    route_ftm2x       = rc4.checkbox("🔄  FTM 2X")
+    # ── 환경 조건 선택 (간단하게) ─────────────────────────
+    st.markdown('<div class="section-header">🌍 환경 & 경로 조건</div>', unsafe_allow_html=True)
+    env1, env2, env3 = st.columns(3)
+    with env1:
+        weather_rainy = 1 if st.selectbox("날씨", ["☀️  맑음 / 흐림", "🌧️  비"]) == "🌧️  비" else 0
+    with env2:
+        elevation_level = st.selectbox("지형", ["🟢  평지 (고도변화 낮음)", "🟡  언덕 (고도변화 중간)", "🔴  산악 (고도변화 높음)"])
+        elevation_std = {"🟢  평지 (고도변화 낮음)": 5.0, "🟡  언덕 (고도변화 중간)": 25.0, "🔴  산악 (고도변화 높음)": 55.0}[elevation_level]
+    with env3:
+        hvac_level = st.selectbox("냉난방 (HVAC)", ["❌  사용 안함", "🔵  약하게", "🔴  강하게"])
+        aircon_mean = {"❌  사용 안함": 0.1, "🔵  약하게": 1.0, "🔴  강하게": 3.0}[hvac_level]
 
-    st.markdown('<div class="section-header">🔍 유사 과거 트립</div>', unsafe_allow_html=True)
+    route_highway = st.checkbox("🛣️  고속도로 경로")
+
+    # ── 고정 기본값 (나머지 피처) ─────────────────────────
+    soc_lag1_std   = 0.02
+    throttle_mean  = 0.18
+    throttle_std   = 0.12
+    batt_temp_diff = 0.05
+    batt_current   = 120.0
+    batt_soc_end   = 0.65
+    route_munich_east = 0
+    route_munich_nfc  = 0
+    route_ftm2x       = 0
+
+    # ── 실시간 예측 (버튼 없음) ───────────────────────────
+    input_data = np.array([[
+        soc_lag1_std, duration_sec, elevation_std, throttle_mean,
+        velocity_mean, int(route_munich_nfc), throttle_std,
+        int(route_munich_east), int(route_highway),
+        batt_temp_diff, batt_soc_end, soc_consumed,
+        batt_current, int(weather_rainy),
+        aircon_mean, int(route_ftm2x)
+    ]])
+    pred     = float(np.clip(model.predict(input_data)[0], 0, 400))
+    pred_eff = pred / (soc_pct) if soc_pct > 0 else 0
+
+    st.markdown("---")
+    st.markdown('<div class="section-header">🏁 실시간 예측 결과</div>', unsafe_allow_html=True)
+
+    # 계기판 3개
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        st.plotly_chart(make_gauge(pred, 100, "예측 주행거리", " km"), use_container_width=True)
+        st.markdown("<div class='gauge-label'>예측 주행거리</div>", unsafe_allow_html=True)
+    with d2:
+        st.plotly_chart(make_gauge(soc_pct, 100, "배터리 소모량", "%"), use_container_width=True)
+        st.markdown("<div class='gauge-label'>배터리 소모량</div>", unsafe_allow_html=True)
+    with d3:
+        st.plotly_chart(make_gauge(velocity_mean, 130, "평균 속도", " km/h"), use_container_width=True)
+        st.markdown("<div class='gauge-label'>평균 속도</div>", unsafe_allow_html=True)
+
+    # 텔레메트리 결과
+    st.markdown('<div class="section-header">📡 예측 상세 결과</div>', unsafe_allow_html=True)
+    for key, val in [
+        ("예측 주행거리",    f"{pred:.2f} km"),
+        ("오차 범위",        f"± 3.27 km"),
+        ("신뢰 구간",        f"{max(0,pred-3.27):.2f} ~ {pred+3.27:.2f} km"),
+        ("배터리 효율",      f"{pred_eff:.2f} km / % SOC"),
+        ("주행 시간",        f"{duration}분"),
+        ("배터리 소모",      f"{soc_pct}%"),
+        ("평균 속도",        f"{velocity_mean} km/h"),
+        ("지형",             elevation_level),
+        ("냉난방",           hvac_level),
+        ("날씨",             "비 ⚠️" if weather_rainy else "맑음 ✅"),
+    ]:
+        st.markdown(f"<div class='telemetry-box'><span class='telemetry-label'>{key}</span><span style='float:right;color:#ffffff;font-weight:700'>{val}</span></div>", unsafe_allow_html=True)
+
+    # 유사 트립
+    st.markdown('<div class="section-header">🔍 유사 과거 트립 Top 3</div>', unsafe_allow_html=True)
     sim = df.copy()
-    sim["유사도"] = (abs(sim["주행시간"]-duration)/7200 + abs(sim["배터리소모"]-soc_consumed) + abs(sim["평균속도"]-velocity_mean)/130)
+    sim["유사도"] = (abs(sim["주행시간"]-duration_sec)/7200 + abs(sim["배터리소모"]-soc_consumed) + abs(sim["평균속도"]-velocity_mean)/130)
     similar = sim.nsmallest(3,"유사도")[["주행시간","배터리소모","평균속도","배터리효율","주행거리"]].round(3)
     similar.columns = ["주행시간 (초)","배터리 소모","평균속도 (km/h)","배터리효율 (km/%)","실제 주행거리 (km)"]
-    st.markdown("<div style='font-size:11px;color:#666666;margin-bottom:8px'>입력값과 유사한 과거 트립 Top 3</div>", unsafe_allow_html=True)
     st.dataframe(similar, use_container_width=True, hide_index=True)
     avg_sim = similar["실제 주행거리 (km)"].mean()
-    st.markdown(f"<div class='telemetry-box'>유사 트립 평균 주행거리 ── <span style='color:#ffffff;font-weight:700'>{avg_sim:.1f} km</span></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='telemetry-box'>유사 트립 평균 주행거리 ── <span style='color:#ffffff;font-weight:700'>{avg_sim:.1f} km</span>  |  예측값과 차이 ── <span style='color:#CC0000;font-weight:700'>{abs(pred-avg_sim):.1f} km</span></div>", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🏎️  주행거리 예측하기"):
-        input_data = np.array([[
-            soc_lag1_std, duration, elevation_std, throttle_mean,
-            velocity_mean, int(route_munich_nfc), throttle_std,
-            int(route_munich_east), int(route_highway),
-            batt_temp_diff, batt_soc_end, soc_consumed,
-            batt_current, int(weather_rainy),
-            aircon_mean, int(route_ftm2x)
-        ]])
-        pred = float(np.clip(model.predict(input_data)[0], 0, 400))
-        pred_eff = pred / (soc_consumed * 100)
-
-        st.markdown("---")
-        st.markdown('<div class="section-header">🏁 예측 결과</div>', unsafe_allow_html=True)
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            st.plotly_chart(make_gauge(pred, 100, "예측 주행거리", " km"), use_container_width=True)
-            st.markdown("<div class='gauge-label'>예측 주행거리</div>", unsafe_allow_html=True)
-        with d2:
-            st.plotly_chart(make_gauge(soc_consumed*100, 100, "배터리 소모량", "%"), use_container_width=True)
-            st.markdown("<div class='gauge-label'>배터리 소모량</div>", unsafe_allow_html=True)
-        with d3:
-            st.plotly_chart(make_gauge(velocity_mean, 130, "평균 속도", " km/h"), use_container_width=True)
-            st.markdown("<div class='gauge-label'>평균 속도</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="section-header">📡 예측 상세 결과</div>', unsafe_allow_html=True)
-        for key, val in [
-            ("예측 주행거리",   f"{pred:.2f} km"),
-            ("오차 범위",       f"± 3.27 km"),
-            ("신뢰 구간",       f"{max(0,pred-3.27):.2f} ~ {pred+3.27:.2f} km"),
-            ("예측 배터리 효율",f"{pred_eff:.2f} km / % SOC"),
-            ("주행 시간",       f"{duration//60}분 {duration%60}초"),
-            ("배터리 소모",     f"{soc_consumed*100:.0f} %"),
-            ("평균 속도",       f"{velocity_mean:.0f} km/h"),
-            ("날씨",            "비 ⚠️" if weather_rainy else "맑음 ✅"),
-        ]:
-            st.markdown(f"<div class='telemetry-box'><span class='telemetry-label'>{key}</span><span style='float:right;color:#ffffff;font-weight:700'>{val}</span></div>", unsafe_allow_html=True)
-
-        if elevation_std > 25:
-            st.warning("⚠️  고도 변화가 큰 경로입니다. 회생제동 패턴이 복잡해 실제 오차가 커질 수 있습니다.")
-        if aircon_mean > 2.0:
-            st.warning("⚠️  HVAC 사용량이 높습니다. 배터리 효율 저하로 실제 주행거리가 예측보다 짧을 수 있습니다.")
+    if elevation_std > 25:
+        st.warning("⚠️  산악/언덕 경로입니다. 회생제동 패턴이 복잡해 실제 오차가 커질 수 있습니다.")
+    if aircon_mean > 2.0:
+        st.warning("⚠️  냉난방을 강하게 사용 중입니다. 실제 주행거리가 예측보다 짧을 수 있습니다.")
 
 
 # =========================================================
@@ -837,4 +856,3 @@ elif menu == "📋  프로젝트 스토리":
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
