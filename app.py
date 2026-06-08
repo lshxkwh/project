@@ -803,12 +803,108 @@ elif menu == "🔮  주행거리 예측기":
     avg_sim = similar["실제 주행거리 (km)"].mean()
     st.markdown(f"<div class='telemetry-box'>유사 트립 평균 주행거리 ── <span style='color:#ffffff;font-weight:700'>{avg_sim:.1f} km</span>  |  예측값과 차이 ── <span style='color:#CC0000;font-weight:700'>{abs(pred-avg_sim):.1f} km</span></div>", unsafe_allow_html=True)
 
+
     if elevation_std > 25:
         st.warning("⚠️  산악/언덕 경로입니다. 회생제동 패턴이 복잡해 실제 오차가 커질 수 있습니다.")
     if aircon_mean > 2.0:
         st.warning("⚠️  냉난방을 강하게 사용 중입니다. 실제 주행거리가 예측보다 짧을 수 있습니다.")
 
+    # ── 에너지 소비 시뮬레이션 ────────────────────────────
+    st.markdown('<div class="section-header">⚡ 실시간 에너지 소비 시뮬레이션</div>', unsafe_allow_html=True)
+    st.markdown("<div style='font-size:11px;color:#666666;margin-bottom:10px'>주행 구간별 배터리 소모 예측 시뮬레이션 (10구간)</div>", unsafe_allow_html=True)
 
+    n_seg = 10
+    t = np.linspace(0, duration, n_seg)
+    base_consumption = soc_pct / n_seg
+    if elevation_std < 10:
+        terrain_factor = np.ones(n_seg) + np.random.normal(0, 0.05, n_seg)
+    elif elevation_std < 30:
+        terrain_factor = 1 + 0.3*np.sin(np.linspace(0, 2*np.pi, n_seg)) + np.random.normal(0, 0.08, n_seg)
+    else:
+        terrain_factor = 1 + 0.5*np.sin(np.linspace(0, 3*np.pi, n_seg)) + np.random.normal(0, 0.12, n_seg)
+    hvac_factor = {"❌  사용 안함": 0.05, "🔵  약하게": 0.15, "🔴  강하게": 0.30}[hvac_level]
+    seg_consumption = base_consumption * terrain_factor + hvac_factor
+    seg_consumption = np.clip(seg_consumption, 0.1, soc_pct)
+    cumulative_soc  = np.clip(100 - np.cumsum(seg_consumption), 0, 100)
+
+    fig_sim = make_subplots(rows=1, cols=2,
+                            subplot_titles=["구간별 배터리 소모 (%)", "누적 배터리 잔량 (%)"])
+    fig_sim.add_trace(go.Bar(
+        x=[f"{i+1}구간" for i in range(n_seg)], y=seg_consumption,
+        marker_color=[RED if v > base_consumption*1.2 else "#444444" for v in seg_consumption],
+        text=[f"{v:.1f}%" for v in seg_consumption],
+        textposition="inside", textfont=dict(color="white", size=10), showlegend=False
+    ), row=1, col=1)
+    fig_sim.add_trace(go.Scatter(
+        x=[f"{i+1}구간" for i in range(n_seg)], y=cumulative_soc,
+        mode="lines+markers", line=dict(color=RED, width=2.5),
+        marker=dict(color=RED, size=8),
+        fill="tozeroy", fillcolor="rgba(204,0,0,0.1)", showlegend=False
+    ), row=1, col=2)
+    fig_sim.add_hline(y=20, line_dash="dot", line_color="#ff6600",
+                      annotation_text="경고 (20%)", annotation_font_color="#ff6600", row=1, col=2)
+    fig_sim.update_layout(height=300, paper_bgcolor="#050505", plot_bgcolor="#0a0a0a",
+                          font=dict(color="#aaaaaa", size=10))
+    for ax in fig_sim.layout:
+        if ax.startswith("xaxis") or ax.startswith("yaxis"):
+            fig_sim.layout[ax].update(gridcolor="#1a1a1a", linecolor="#222222")
+    st.plotly_chart(fig_sim, use_container_width=True)
+
+    # 에너지 손실 파이차트
+    st.markdown('<div class="section-header">🥧 에너지 손실 요인 분석</div>', unsafe_allow_html=True)
+    driving_energy = max(10, soc_pct - hvac_factor*10 - (elevation_std/100)*soc_pct*0.3)
+    hvac_energy    = hvac_factor * 10
+    elev_energy    = (elevation_std/100) * soc_pct * 0.3
+    other_energy   = max(0.1, soc_pct - driving_energy - hvac_energy - elev_energy)
+    fig_pie = go.Figure(go.Pie(
+        labels=["주행 구동력","냉난방 (HVAC)","고도 극복","기타 손실"],
+        values=[driving_energy, hvac_energy, elev_energy, other_energy],
+        marker_colors=[RED,"#555555","#333333","#222222"],
+        textinfo="label+percent", textfont=dict(color="white", size=11), hole=0.4,
+    ))
+    fig_pie.update_layout(height=300, paper_bgcolor="#050505", font=dict(color="#aaaaaa"),
+                          showlegend=False,
+                          annotations=[dict(text=f"{soc_pct}%\n소모", x=0.5, y=0.5,
+                                           font=dict(size=14, color=RED), showarrow=False)])
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+    # 스마트 인사이트
+    st.markdown('<div class="section-header">🤖 스마트 인사이트</div>', unsafe_allow_html=True)
+    insights = []
+    if pred_eff > 0.8:
+        insights.append(("🟢 높은 배터리 효율", f"현재 조건에서 배터리 효율이 {pred_eff:.2f} km/%로 평균 이상입니다. 최적의 주행 조건입니다.", "#2a9d6f"))
+    elif pred_eff > 0.5:
+        insights.append(("🟡 보통 배터리 효율", f"배터리 효율 {pred_eff:.2f} km/%. 속도를 40~80km/h로 유지하면 효율이 높아집니다.", "#f4a261"))
+    else:
+        insights.append(("🔴 낮은 배터리 효율", f"배터리 효율 {pred_eff:.2f} km/%. 냉난방을 줄이거나 속도를 낮추면 주행거리가 늘어납니다.", "#CC0000"))
+    if velocity_mean < 40:
+        insights.append(("⚠️ 저속 주행", "저속 구간은 잦은 가속·감속으로 에너지 손실이 발생합니다. 회생제동을 적극 활용하세요.", "#f4a261"))
+    elif velocity_mean <= 80:
+        insights.append(("✅ 최적 속도 구간", f"{velocity_mean} km/h는 배터리 효율이 가장 높은 구간입니다.", "#2a9d6f"))
+    else:
+        insights.append(("⚠️ 고속 주행", f"{velocity_mean} km/h는 공기저항이 급증하는 구간입니다. 속도를 낮추면 주행거리가 늘어납니다.", "#f4a261"))
+    if elevation_std > 30:
+        insights.append(("⛰️ 산악 경로 주의", "고도 변화가 크면 예측 오차가 커질 수 있습니다. 실제 ±5 km 이상 차이날 수 있습니다.", "#CC0000"))
+    if aircon_mean > 2.0:
+        km_lost = aircon_mean * 2.5
+        insights.append(("❄️ 냉난방 영향 큼", f"강한 냉난방으로 약 {km_lost:.1f} km 손실 예상. 적정 온도 유지를 권장합니다.", "#CC0000"))
+    if weather_rainy:
+        insights.append(("🌧️ 우천 주행", "비 오는 날은 타이어 마찰 증가 + 와이퍼 전력 소모로 약 3~5% 효율이 저하됩니다.", "#f4a261"))
+    diff = pred - avg_sim
+    if abs(diff) < 2:
+        insights.append(("🎯 높은 예측 신뢰도", f"유사 트립 평균({avg_sim:.1f} km)과 예측값({pred:.1f} km)이 {abs(diff):.1f} km 차이로 신뢰도가 높습니다.", "#2a9d6f"))
+    elif diff > 0:
+        insights.append(("📊 예측값이 높음", f"예측값이 유사 트립 평균보다 {diff:.1f} km 높습니다. 실제 주행 조건에 따라 차이날 수 있습니다.", "#f4a261"))
+    else:
+        insights.append(("📊 예측값이 낮음", f"예측값이 유사 트립 평균보다 {abs(diff):.1f} km 낮습니다. 보수적인 예측입니다.", "#f4a261"))
+    for title, desc, color in insights:
+        st.markdown(f"""
+        <div style='background:#0a0a0a;border:1px solid #222222;border-left:4px solid {color};
+                    padding:12px 16px;margin:6px 0;border-radius:2px'>
+            <div style='color:{color};font-weight:700;font-size:12px;margin-bottom:4px'>{title}</div>
+            <div style='color:#aaaaaa;font-size:11px;line-height:1.6'>{desc}</div>
+        </div>
+        """, unsafe_allow_html=True)
 # =========================================================
 # [9] 프로젝트 스토리
 # =========================================================
